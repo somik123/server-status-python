@@ -28,6 +28,7 @@ import json
 import shutil
 import argparse
 import base64
+import socket
 
 
 html_page = """
@@ -401,6 +402,16 @@ def generate_html():
     return output
 
 
+def check_open_ports(ports):
+    results = []
+    for port in ports:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as a_socket:
+            location = ("127.0.0.1", port)
+            check = a_socket.connect_ex(location)
+            results.append(check == 0)
+    return results
+
+
 class MyServer(BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path == '/data':
@@ -416,7 +427,9 @@ class MyServer(BaseHTTPRequestHandler):
 
             total, used, free = shutil.disk_usage("/")
 
-            output = [[False,False,False],None,[round(load1,2),round(load5,2),round(load15,2)],{"total":memArr[0],"cached":memArr[1],"usage":memArr[2],"free":memArr[3].strip(),"tag":"MB"},{"total": round(total/1073741824,1),"usage":round(used/1073741824,1),"tag":"GB"}]
+            port_status = check_open_ports([80,22,139])
+
+            output = [port_status,None,[round(load1,2),round(load5,2),round(load15,2)],{"total":memArr[0],"cached":memArr[1],"usage":memArr[2],"free":memArr[3].strip(),"tag":"MB"},{"total": round(total/1073741824,1),"usage":round(used/1073741824,1),"tag":"GB"}]
             self.wfile.write(bytes(json.dumps(output), "utf-8"))
             return
         
