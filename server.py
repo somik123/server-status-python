@@ -6,13 +6,13 @@
 # Edit crontabs by running the command: 
 #     crontab -e
 # And add to file:
-#     @reboot python3 /home/somik/status/server.py 9888 > /home/somik/status/logs.txt 2>&1 &
+#     @reboot python3 /home/somik/status/server.py 9808 > /home/somik/status/logs.txt 2>&1 &
 #
 # Or set it up in /etc/rc.local [before] the "exit 0" line as following:
 # Edit rc.local file by running the command: 
 #     sudo nano /etc/rc.local
 # And add to file:
-#     @reboot python3 /home/somik/status/server.py 9888 > /home/somik/status/logs.txt 2>&1 &
+#     @reboot python3 /home/somik/status/server.py 9808 > /home/somik/status/logs.txt 2>&1 &
 #
 # Note: You do NOT need to run it as sudo
 #
@@ -31,7 +31,19 @@ import base64
 import socket
 
 
-html_page = """
+html_disk_template = """
+		<div id="diskinfo" class="box">
+			<div>
+                <div class="subtitle"><span id="disk_total_[id]" style="font-weight: bolder;"></span></div>
+				<div class="progress_bar">
+					<div class="bar1_box" id="disk_used_box_[id]"></div>
+					<div class="bar2_box" id="disk_cached_box_[id]"></div>
+				</div>
+			</div>
+		</div>
+"""
+
+html_page_template = """
 <html>
 <head>
 	<meta http-equiv="content-type" content="text/html; charset=UTF-8">
@@ -85,6 +97,11 @@ html_page = """
 			text-align: center;
 			font-size: 12px;
 		}
+
+        .subtitle {
+            text-align: center;
+            font-size: 12px;
+        }
 
 		.value {
 			color: #0AF;
@@ -218,15 +235,8 @@ html_page = """
 			</div>
 		</div>
 
-		<div class="title">Disk space <span id="disk_total" style="font-weight: bolder;"></span></div>
-		<div id="diskinfo" class="box">
-			<div>
-				<div class="progress_bar">
-					<div class="bar1_box" id="disk_used_box"></div>
-					<div class="bar2_box" id="disk_cached_box"></div>
-				</div>
-			</div>
-		</div>
+        <div class="title">Disk space</div>
+		[disk_html]
 
 		<div class="title">software</div>
 		<div id="software" class="box">
@@ -234,8 +244,7 @@ html_page = """
 				<li>Server Hostname: <span class="value">[hostname]</span></li>
 				<li>Server IP: <span class="value">[ip]</span></li>
 				<li>Operating System: <span class="value">[os]</span></li>
-				<li>Webserver: <span class="value">Unknown</span></li>
-				<li>CPU: <span class="value">[cpu]</span></li>
+ 				<li>CPU: <span class="value">[cpu]</span></li>
 			</ul>
 		</div>
 
@@ -330,12 +339,13 @@ html_page = """
 			document.getElementById("mem_total").innerHTML = "[Total " + mem['total'] + " " + mem['tag'] + "]";
 		}
 		function disk_progress(disk) {
-			var used_box = (disk['usage'] / disk['total'] * 100);
-			var used_txt = used_box / 2;
-
-			$('#disk_used_box').html(disk['usage'] + " " + disk['tag']);
-			document.getElementById("disk_used_box").style.width = used_box + "%";
-			document.getElementById("disk_total").innerHTML = "[Total " + disk['total'] + " " + disk['tag'] + "]";
+            num_disk =  disk.length;
+			for (var i = 0; i < num_disk; i++) {
+				// Calculate the percentage of disk usage
+				var used_box = (parseInt(disk[i]['used']) / parseInt(disk[i]['total']) * 100);
+				document.getElementById("disk_used_box_"+i).style.width = used_box + "%";
+				document.getElementById("disk_total_"+i).innerHTML = disk[i]['mount'] + " [" + disk[i]['total'] + "]";
+			}
 		}
 	</script>
 </body>
@@ -380,6 +390,29 @@ def get_uptime():
 
         return [days,hours,minutes,seconds]
 
+def get_real_mounts():
+    # Run `df -TBG` to include filesystem type
+    result = subprocess.run(['df', '-TBG'], capture_output=True, text=True)
+    lines = result.stdout.strip().split('\n')
+
+    mounts = []
+    for line in lines[1:]:  # Skip header
+        parts = line.split()
+        if len(parts) < 7:
+            continue  # Skip malformed lines
+
+        fstype = parts[1]
+        mount = parts[6]
+        if fstype != 'tmpfs' and fstype != 'devtmpfs':
+            mounts.append({
+                'fs': parts[0],
+                'type': fstype,
+                'total': parts[2],
+                'used': parts[3],
+                'free': parts[4],
+                'mount': mount
+            })
+    return mounts
 
 def get_cpu():
     cmd = "cat /proc/cpuinfo | grep -i 'model name' | awk 'NR==2{$1=$2=$3=\"\";print $0}'"
@@ -390,7 +423,15 @@ def get_cpu():
 def generate_html():
     uptime = get_uptime()
     hostname = subprocess.check_output("hostname", shell=True).decode("utf-8")
-    output = html_page
+
+    disk_html = ""
+    disk_usage = get_real_mounts()
+    disk_count = len(disk_usage)
+    for i in range(disk_count):
+        disk_html += html_disk_template.replace("[id]", str(i))
+        disk_html += "\n"
+
+    output = html_page_template
     output = output.replace("[days]", str(uptime[0]))
     output = output.replace("[hours]", str(uptime[1]))
     output = output.replace("[mins]", str(uptime[2]))
@@ -399,6 +440,7 @@ def generate_html():
     output = output.replace("[ip]", get_ip())
     output = output.replace("[os]", get_distro())
     output = output.replace("[cpu]", get_cpu())
+    output = output.replace("[disk_html]", disk_html)
     return output
 
 
@@ -426,10 +468,11 @@ class MyServer(BaseHTTPRequestHandler):
             memArr = mem.split(" ")
 
             total, used, free = shutil.disk_usage("/")
+            disk_usage = get_real_mounts()
 
             port_status = check_open_ports([80,22,139])
 
-            output = [port_status,None,[round(load1,2),round(load5,2),round(load15,2)],{"total":memArr[0],"cached":memArr[1],"usage":memArr[2],"free":memArr[3].strip(),"tag":"MB"},{"total": round(total/1073741824,1),"usage":round(used/1073741824,1),"tag":"GB"}]
+            output = [port_status,None,[round(load1,2),round(load5,2),round(load15,2)],{"total":memArr[0],"cached":memArr[1],"usage":memArr[2],"free":memArr[3].strip(),"tag":"MB"},disk_usage]
             self.wfile.write(bytes(json.dumps(output), "utf-8"))
             return
         
@@ -437,7 +480,6 @@ class MyServer(BaseHTTPRequestHandler):
             self.send_response(200)
             self.send_header("Content-type", "text/html")
             self.end_headers()
-
             self.wfile.write(bytes(generate_html(), "utf-8"))
             return
             
