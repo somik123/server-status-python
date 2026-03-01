@@ -385,26 +385,32 @@ def get_distro_old():
 
 def get_distro():
     os_type = platform.system()  # 'Windows', 'Linux', 'Darwin', etc.
-    os_version = platform.version()  # OS version
-    os_release = platform.release()  # OS release
+    os_release = platform.release()
+    os_version = platform.version()
 
-    # For Linux, get distro info if available
-    if os_type == "Linux":
-        try:
-            # Python >= 3.8
-            import distro
-            distro_name = distro.name(pretty=True)
-            distro_version = distro.version(pretty=True)
-            full_info = f"{distro_name} {distro_version})"
-        except ImportError:
-            # fallback if distro module not installed
-            full_info = f"Linux {os_release}"
-    elif os_type == "Windows":
-        full_info = f"Windows {platform.win32_ver()[0]} (Build {platform.win32_ver()[1]})"
+    if os_type == "Windows":
+        # Returns version and build
+        ver, build, sp, _ = platform.win32_ver()
+        full_info = f"Windows {ver} (Build {build})"
     elif os_type == "Darwin":
+        # macOS version
         full_info = f"macOS {platform.mac_ver()[0]}"
+    elif os_type == "Linux":
+        # Linux: report kernel + parse distro from version string if present
+        # Example version string: '#1 SMP PREEMPT_DYNAMIC Debian 6.1.162-1 (2026-02-08)'
+        distro_name = "Unknown Linux"
+        version_info = os_version
+        if "(" in os_version:
+            version_info = os_version.split("(")[0].strip()
+            if "Debian" in os_version:
+                distro_name = "Debian"
+            elif "Ubuntu" in os_version:
+                distro_name = "Ubuntu"
+            elif "CentOS" in os_version:
+                distro_name = "CentOS"
+        full_info = f"{distro_name} (Kernel {os_release}, {version_info})"
     else:
-        full_info = f"{os_type} {os_version}"
+        full_info = f"{os_type} {os_release} {os_version}"
 
     return full_info
 
