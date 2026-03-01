@@ -29,6 +29,8 @@ import shutil
 import argparse
 import base64
 import socket
+import platform
+import sys
 
 
 html_disk_template = """
@@ -362,8 +364,9 @@ def get_ip():
     ip = subprocess.check_output(cmd, shell=True).decode("utf-8")
     return ip.strip()
 
-
-def get_distro():
+""" 
+# Depricated function
+def get_distro_old():
     distrosArr = {
         'debian_version': 'Debian',
         'centos-release' : 'CentOS',
@@ -378,6 +381,32 @@ def get_distro():
         if(exists(release_file)):
             return distrosArr[key]
     return "Unknown"
+"""
+
+def get_distro():
+    os_type = platform.system()  # 'Windows', 'Linux', 'Darwin', etc.
+    os_version = platform.version()  # OS version
+    os_release = platform.release()  # OS release
+
+    # For Linux, get distro info if available
+    if os_type == "Linux":
+        try:
+            # Python >= 3.8
+            import distro
+            distro_name = distro.name(pretty=True)
+            distro_version = distro.version(pretty=True)
+            full_info = f"{distro_name} {distro_version})"
+        except ImportError:
+            # fallback if distro module not installed
+            full_info = f"Linux {os_release}"
+    elif os_type == "Windows":
+        full_info = f"Windows {platform.win32_ver()[0]} (Build {platform.win32_ver()[1]})"
+    elif os_type == "Darwin":
+        full_info = f"macOS {platform.mac_ver()[0]}"
+    else:
+        full_info = f"{os_type} {os_version}"
+
+    return full_info
 
 
 def get_uptime():
